@@ -1,6 +1,8 @@
 """
-CoralSCOP - Coral Reef Segmentation Streamlit Dashboard
-Powered by reefsupport/CoralSCOP ViT-B Foundation Model
+CoralSCOP - Coral Reef Segmentation Streamlit Studio
+Two-stage workflow: 
+1. Ingestion Page: Upload, Folder Scan, or Demo Samples
+2. Analysis Studio: Dedicated clean viewing space with Prev/Next pagination and sidebar analytics
 """
 
 import os
@@ -23,13 +25,13 @@ from coral_engine import (
 
 # Set page config
 st.set_page_config(
-    page_title="CoralSCOP - Coral Segmentation Dashboard",
+    page_title="CoralSCOP - Coral Segmentation Studio",
     page_icon="🪸",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS styling for polished theme
+# Custom CSS styling for modern studio feel
 st.markdown(
     """
     <style>
@@ -48,29 +50,46 @@ st.markdown(
         background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
         border: 1px solid #bae6fd;
         border-radius: 10px;
-        padding: 15px;
+        padding: 14px;
         text-align: center;
         margin-bottom: 10px;
     }
     .metric-card-val {
-        font-size: 1.8rem;
+        font-size: 1.7rem;
         font-weight: 700;
         color: #0369a1;
     }
     .metric-card-lbl {
-        font-size: 0.85rem;
+        font-size: 0.8rem;
         color: #0284c7;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.5px;
     }
-    .pagination-bar {
-        background-color: #f8fafc;
+    .nav-header-box {
+        background: #ffffff;
         border: 1px solid #e2e8f0;
-        border-radius: 10px;
-        padding: 8px 14px;
-        margin-top: 10px;
-        margin-bottom: 15px;
+        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05);
+        border-radius: 12px;
+        padding: 10px 16px;
+        margin-bottom: 16px;
+    }
+    .upload-card {
+        background: #f8fafc;
+        border: 1px dashed #cbd5e1;
+        border-radius: 12px;
+        padding: 24px;
+        text-align: center;
+    }
+    .img-badge {
+        background-color: #f1f5f9;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #334155;
+        display: inline-block;
     }
     </style>
     """,
@@ -85,9 +104,19 @@ def get_cached_model(device_preference: str = "auto"):
     return load_coralscop_model(device=device), device
 
 
-def main():
-    # Header
-    st.markdown("<div class='main-title'>🪸 CoralSCOP Segmentation Dashboard</div>", unsafe_allow_html=True)
+def initialize_session_state():
+    """Ensures necessary session state variables exist."""
+    if "app_stage" not in st.session_state:
+        st.session_state["app_stage"] = "upload"  # "upload" or "analysis"
+    if "loaded_images" not in st.session_state:
+        st.session_state["loaded_images"] = {}  # {filename: PIL.Image}
+    if "selected_img_idx" not in st.session_state:
+        st.session_state["selected_img_idx"] = 0
+
+
+def render_upload_page():
+    """Screen 1: Clean file upload & selection landing page."""
+    st.markdown("<div class='main-title'>🪸 CoralSCOP Segmentation Studio</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='sub-title'>Dense semantic segmentation of coral reef imagery powered by "
         "<b><a href='https://huggingface.co/reefsupport/CoralSCOP' target='_blank'>reefsupport/CoralSCOP</a></b> "
@@ -95,27 +124,161 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # ------------------ SIDEBAR: HARDWARE & MODEL CONFIG ------------------
-    with st.sidebar:
-        st.header("⚙️ Model & Hardware")
-        device_info = get_device_info()
+    tab_upload, tab_folder, tab_demo = st.tabs(["📁 Upload Image(s)", "📂 Local Folder Scan", "🌊 Sample Coral Reefs"])
 
-        device_label = device_info.get("gpu_name", "CPU")
-        if device_info["cuda_available"]:
-            st.success(f"🚀 **CUDA GPU**: {device_label}")
-        elif device_info["mps_available"]:
-            st.info(f"⚡ **Apple Silicon**: {device_label}")
-        else:
-            st.warning(f"💻 **CPU Mode**: {device_label}")
+    stage_images = {}
 
-        device_pref = st.selectbox(
-            "Device Preference",
-            options=["auto", "cuda", "mps", "cpu"],
-            index=0,
-            help="Prioritizes CUDA -> MPS -> CPU by default.",
+    with tab_upload:
+        st.markdown("#### Upload Underwater Coral Images")
+        uploaded_files = st.file_uploader(
+            "Select one or more images (.jpg, .jpeg, .png, .tif, .webp)",
+            type=["jpg", "jpeg", "png", "tif", "tiff", "webp"],
+            accept_multiple_files=True,
+            help="Upload one or multiple coral quadrat photos.",
         )
+        if uploaded_files:
+            for uf in uploaded_files:
+                try:
+                    img = Image.open(uf).convert("RGB")
+                    stage_images[uf.name] = img
+                except Exception as ex:
+                    st.error(f"Error loading {uf.name}: {ex}")
 
-        with st.expander("🛠️ Inference Hyperparameters", expanded=False):
+            if stage_images:
+                st.success(f"✅ Loaded {len(stage_images)} image(s) ready for analysis.")
+                cols = st.columns(min(len(stage_images), 5))
+                for i, (fn, img) in enumerate(stage_images.items()):
+                    with cols[i % len(cols)]:
+                        st.image(img.resize((160, 160)), caption=fn[:18] + "...", use_container_width=True)
+
+    with tab_folder:
+        st.markdown("#### Scan Local Directory")
+        folder_path = st.text_input(
+            "Enter path to folder containing coral images:",
+            value="",
+            placeholder="/path/to/coral/images",
+        )
+        if folder_path and os.path.isdir(folder_path):
+            valid_exts = ("*.jpg", "*.jpeg", "*.png", "*.tif", "*.tiff", "*.webp")
+            found_files = []
+            for ext in valid_exts:
+                found_files.extend(glob.glob(os.path.join(folder_path, ext)))
+                found_files.extend(glob.glob(os.path.join(folder_path, ext.upper())))
+            found_files = sorted(list(set(found_files)))
+
+            if found_files:
+                st.success(f"✅ Found {len(found_files)} images in folder.")
+                for fp in found_files:
+                    fn = os.path.basename(fp)
+                    try:
+                        stage_images[fn] = Image.open(fp).convert("RGB")
+                    except Exception as ex:
+                        st.warning(f"Could not load {fn}: {ex}")
+
+                cols = st.columns(min(len(stage_images), 5))
+                for i, (fn, img) in enumerate(list(stage_images.items())[:5]):
+                    with cols[i % len(cols)]:
+                        st.image(img.resize((160, 160)), caption=fn[:18] + "...", use_container_width=True)
+            else:
+                st.info("No supported image files found in the directory.")
+        elif folder_path:
+            st.error("Directory not found.")
+
+    with tab_demo:
+        st.markdown("#### Research Sample Datasets")
+        demo_dir = os.path.join(os.path.dirname(__file__), "demo_images")
+        if os.path.isdir(demo_dir):
+            demo_files = sorted(glob.glob(os.path.join(demo_dir, "*.jpg")))
+            if demo_files:
+                st.write(f"Preloaded with {len(demo_files)} coral reef quadrat samples:")
+                cols = st.columns(min(len(demo_files), 4))
+                for i, df in enumerate(demo_files):
+                    fn = os.path.basename(df)
+                    col = cols[i % len(cols)]
+                    with col:
+                        thumbnail = Image.open(df).resize((180, 180))
+                        col.image(thumbnail, caption=f"Sample #{i+1}", use_container_width=True)
+
+                if st.button("🌊 Load All Sample Images for Analysis", type="primary"):
+                    for df in demo_files:
+                        fn = os.path.basename(df)
+                        stage_images[fn] = Image.open(df).convert("RGB")
+                    st.session_state["loaded_images"] = stage_images
+                    st.session_state["selected_img_idx"] = 0
+                    st.session_state["app_stage"] = "analysis"
+                    st.rerun()
+
+    # Proceed Button if images are staged
+    if stage_images:
+        st.divider()
+        c_btn, _ = st.columns([2, 3])
+        with c_btn:
+            if st.button(f"🚀 Analyze {len(stage_images)} Image(s) ➔", type="primary", use_container_width=True):
+                st.session_state["loaded_images"] = stage_images
+                st.session_state["selected_img_idx"] = 0
+                st.session_state["app_stage"] = "analysis"
+                st.rerun()
+
+
+def render_analysis_page(model):
+    """Screen 2: Dedicated analysis & pagination view with images and clean controls."""
+    images_dict = st.session_state.get("loaded_images", {})
+    if not images_dict:
+        st.session_state["app_stage"] = "upload"
+        st.rerun()
+
+    image_names = list(images_dict.keys())
+    total_images = len(image_names)
+
+    # Ensure index is within range
+    if st.session_state["selected_img_idx"] >= total_images:
+        st.session_state["selected_img_idx"] = 0
+
+    cur_idx = st.session_state["selected_img_idx"]
+    current_img_name = image_names[cur_idx]
+    current_image = images_dict[current_img_name]
+
+    # ------------------ TOP NAVIGATION HEADER ------------------
+    nav_col_back, nav_col_pages, nav_col_info = st.columns([1.6, 5.4, 3.0], vertical_alignment="center")
+
+    with nav_col_back:
+        if st.button("⬅ Back to Upload", use_container_width=True):
+            st.session_state["app_stage"] = "upload"
+            st.rerun()
+
+    with nav_col_pages:
+        if total_images > 1:
+            p_prev, p_nums, p_next = st.columns([1.1, 4.8, 1.1], vertical_alignment="center")
+            with p_prev:
+                if st.button("◀ Prev", disabled=(cur_idx == 0), use_container_width=True, key="p_btn_prev"):
+                    st.session_state["selected_img_idx"] = max(0, cur_idx - 1)
+                    st.rerun()
+
+            with p_nums:
+                page_options = [f"{i+1}" for i in range(total_images)]
+                selected_page = st.segmented_control(
+                    "Image Navigation",
+                    options=page_options,
+                    default=page_options[cur_idx],
+                    label_visibility="collapsed",
+                    key="p_nav_segmented",
+                )
+                if selected_page and int(selected_page) - 1 != cur_idx:
+                    st.session_state["selected_img_idx"] = int(selected_page) - 1
+                    st.rerun()
+
+            with p_next:
+                if st.button("Next ▶", disabled=(cur_idx >= total_images - 1), use_container_width=True, key="p_btn_next"):
+                    st.session_state["selected_img_idx"] = min(total_images - 1, cur_idx + 1)
+                    st.rerun()
+
+    with nav_col_info:
+        st.markdown(f"<div class='img-badge'>🖼️ <b>Image {cur_idx + 1} of {total_images}</b>: {current_img_name}</div>", unsafe_allow_html=True)
+
+    # ------------------ SIDEBAR CONTROLS & PARAMS ------------------
+    with st.sidebar:
+        # 1. Hyperparameters
+        with st.expander("🛠️ Inference Parameters", expanded=False):
             points_per_side = st.slider(
                 "Points Per Side (Grid Density)",
                 min_value=8,
@@ -149,169 +312,29 @@ def main():
                 help="Removes tiny noise fragments below this pixel count.",
             )
 
-        st.divider()
+        # 2. Run Segmentation
+        seg_cache_key = f"seg_{current_img_name}_{points_per_side}_{iou_thresh}_{stability_thresh}_{min_area_px}"
+        if seg_cache_key not in st.session_state:
+            with st.spinner(f"Segmenting '{current_img_name}' with CoralSCOP..."):
+                img_np = np.array(current_image)
+                masks_info, summary_stats = run_segmentation(
+                    model=model,
+                    image=img_np,
+                    points_per_side=points_per_side,
+                    pred_iou_thresh=iou_thresh,
+                    stability_score_thresh=stability_thresh,
+                    min_mask_region_area=min_area_px,
+                )
+                st.session_state[seg_cache_key] = {
+                    "masks_info": masks_info,
+                    "summary_stats": summary_stats,
+                }
 
-    # Load model with status
-    with st.spinner("Initializing CoralSCOP Foundation Model..."):
-        try:
-            model, current_device = get_cached_model(device_pref)
-        except Exception as e:
-            st.error(f"Failed to load model: {e}")
-            return
+        seg_result = st.session_state[seg_cache_key]
+        masks_info = seg_result["masks_info"]
+        summary_stats = seg_result["summary_stats"]
 
-    # ------------------ IMAGE INPUT TABS ------------------
-    tab_upload, tab_folder, tab_demo = st.tabs(["📁 Upload Image(s)", "📂 Local Folder Scan", "🌊 Sample Coral Reefs"])
-
-    selected_images = {}  # {filename: PIL.Image}
-
-    with tab_upload:
-        uploaded_files = st.file_uploader(
-            "Upload single or multiple coral images",
-            type=["jpg", "jpeg", "png", "tif", "tiff", "webp"],
-            accept_multiple_files=True,
-        )
-        if uploaded_files:
-            for uf in uploaded_files:
-                try:
-                    img = Image.open(uf).convert("RGB")
-                    selected_images[uf.name] = img
-                except Exception as ex:
-                    st.error(f"Error loading {uf.name}: {ex}")
-
-    with tab_folder:
-        folder_path = st.text_input(
-            "Enter local directory path containing images:",
-            value="",
-            placeholder="/path/to/coral/images",
-        )
-        if folder_path and os.path.isdir(folder_path):
-            valid_exts = ("*.jpg", "*.jpeg", "*.png", "*.tif", "*.tiff", "*.webp")
-            found_files = []
-            for ext in valid_exts:
-                found_files.extend(glob.glob(os.path.join(folder_path, ext)))
-                found_files.extend(glob.glob(os.path.join(folder_path, ext.upper())))
-            found_files = sorted(list(set(found_files)))
-
-            if found_files:
-                st.success(f"Found {len(found_files)} images in folder.")
-                for fp in found_files:
-                    fn = os.path.basename(fp)
-                    try:
-                        selected_images[fn] = Image.open(fp).convert("RGB")
-                    except Exception as ex:
-                        st.warning(f"Could not load {fn}: {ex}")
-            else:
-                st.info("No matching image files found in the provided directory.")
-        elif folder_path:
-            st.error("Directory does not exist.")
-
-    with tab_demo:
-        demo_dir = os.path.join(os.path.dirname(__file__), "demo_images")
-        if os.path.isdir(demo_dir):
-            demo_files = sorted(glob.glob(os.path.join(demo_dir, "*.jpg")))
-            if demo_files:
-                st.markdown("Select from preloaded coral quadrat research samples:")
-                cols = st.columns(min(len(demo_files), 4))
-                for i, df in enumerate(demo_files):
-                    fn = os.path.basename(df)
-                    col = cols[i % len(cols)]
-                    with col:
-                        thumbnail = Image.open(df).resize((180, 180))
-                        col.image(thumbnail, caption=fn[:20] + "...", use_container_width=True)
-                        if col.button(f"Select #{i+1}", key=f"btn_demo_{i}"):
-                            st.session_state["selected_img_idx"] = i
-                            st.rerun()
-
-                # Populate all demo files so pagination works across all demo images
-                for df in demo_files:
-                    fn = os.path.basename(df)
-                    selected_images[fn] = Image.open(df).convert("RGB")
-
-    if not selected_images:
-        st.info("👈 Please upload an image, specify a folder path, or select a sample image above to start segmentation.")
-        return
-
-    # ------------------ PAGINATION BAR (PREV 1 2 3 4 NEXT) ------------------
-    image_names = list(selected_images.keys())
-    total_images = len(image_names)
-
-    if total_images > 1:
-        if "selected_img_idx" not in st.session_state or st.session_state["selected_img_idx"] >= total_images:
-            st.session_state["selected_img_idx"] = 0
-
-        cur_idx = st.session_state["selected_img_idx"]
-
-        # Render pagination bar with Prev, Numbers (1, 2, 3, 4...), Next
-        st.markdown("<div class='pagination-bar'>", unsafe_allow_html=True)
-        nav_prev, nav_pages, nav_next, nav_info = st.columns([1.1, 4.5, 1.1, 3.3], vertical_alignment="center")
-
-        with nav_prev:
-            if st.button("◀ Prev", disabled=(cur_idx == 0), use_container_width=True, key="btn_prev_img"):
-                st.session_state["selected_img_idx"] = max(0, cur_idx - 1)
-                st.rerun()
-
-        with nav_pages:
-            page_options = [f"{i+1}" for i in range(total_images)]
-            selected_page = st.segmented_control(
-                "Image Page",
-                options=page_options,
-                default=page_options[cur_idx],
-                label_visibility="collapsed",
-                key="img_pagination_control",
-            )
-            if selected_page and int(selected_page) - 1 != cur_idx:
-                st.session_state["selected_img_idx"] = int(selected_page) - 1
-                st.rerun()
-
-        with nav_next:
-            if st.button("Next ▶", disabled=(cur_idx >= total_images - 1), use_container_width=True, key="btn_next_img"):
-                st.session_state["selected_img_idx"] = min(total_images - 1, cur_idx + 1)
-                st.rerun()
-
-        with nav_info:
-            st.markdown(f"**Image {cur_idx + 1} of {total_images}**: `{image_names[cur_idx]}`")
-
-        st.markdown("</div>", unsafe_allow_html=True)
-        current_img_name = image_names[st.session_state["selected_img_idx"]]
-    else:
-        current_img_name = image_names[0]
-
-    current_image = selected_images[current_img_name]
-
-    # ------------------ SEGMENTATION EXECUTION ------------------
-    seg_cache_key = f"seg_{current_img_name}_{points_per_side}_{iou_thresh}_{stability_thresh}_{min_area_px}"
-
-    col_btn, col_info_msg = st.columns([1.2, 4.8], vertical_alignment="center")
-    with col_btn:
-        run_btn = st.button("🚀 Segment Image", type="primary", use_container_width=True)
-    with col_info_msg:
-        if seg_cache_key in st.session_state:
-            found_cnt = st.session_state[seg_cache_key]["summary_stats"]["total_corals_detected"]
-            cov_pct = st.session_state[seg_cache_key]["summary_stats"]["coral_coverage_pct"]
-            st.caption(f"✅ Segmented: **{found_cnt} coral instances** detected ({cov_pct}% reef coverage). Click button to re-run.")
-
-    if run_btn or seg_cache_key not in st.session_state:
-        with st.spinner(f"Analyzing and segmenting '{current_img_name}' with CoralSCOP..."):
-            img_np = np.array(current_image)
-            masks_info, summary_stats = run_segmentation(
-                model=model,
-                image=img_np,
-                points_per_side=points_per_side,
-                pred_iou_thresh=iou_thresh,
-                stability_score_thresh=stability_thresh,
-                min_mask_region_area=min_area_px,
-            )
-            st.session_state[seg_cache_key] = {
-                "masks_info": masks_info,
-                "summary_stats": summary_stats,
-            }
-
-    seg_result = st.session_state[seg_cache_key]
-    masks_info = seg_result["masks_info"]
-    summary_stats = seg_result["summary_stats"]
-
-    # ------------------ SIDEBAR: COLLAPSIBLE DISPLAY & OVERLAY CONTROLS ------------------
-    with st.sidebar:
+        # 3. Collapsible Display & Overlay Controls
         with st.expander("🎨 Display & Overlay Controls", expanded=True):
             st.markdown("**Layout View**")
             view_mode = st.segmented_control(
@@ -319,7 +342,7 @@ def main():
                 options=["Side-by-Side", "Overlay Only", "Original Only", "Masks on Black"],
                 default="Side-by-Side",
                 label_visibility="collapsed",
-                key="view_mode_segmented",
+                key="side_view_mode",
             )
             if not view_mode:
                 view_mode = "Side-by-Side"
@@ -341,19 +364,105 @@ def main():
 
         st.divider()
 
-    # Generate Overlay
-    overlay_img_np = create_segmentation_overlay(
-        image=current_image,
-        masks_info=masks_info,
-        alpha=alpha_val,
-        draw_contours=draw_contours,
-        draw_labels=draw_labels,
-        draw_boxes=draw_boxes,
-        selected_mask_id=selected_mask_id,
-    )
-    overlay_pil = Image.fromarray(overlay_img_np)
+        # 4. Coral Analysis Metrics
+        st.header("📊 Coral Analysis")
+        kpi_c1, kpi_c2 = st.columns(2)
+        with kpi_c1:
+            st.markdown(
+                f"""
+                <div class='metric-card'>
+                    <div class='metric-card-val'>{summary_stats['total_corals_detected']}</div>
+                    <div class='metric-card-lbl'>Corals Found</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with kpi_c2:
+            st.markdown(
+                f"""
+                <div class='metric-card'>
+                    <div class='metric-card-val'>{summary_stats['coral_coverage_pct']}%</div>
+                    <div class='metric-card-lbl'>Reef Coverage</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-    # ------------------ MAIN VIEW (ORIGINAL VS OVERLAY) ------------------
+        kpi_c3, kpi_c4 = st.columns(2)
+        with kpi_c3:
+            st.metric("Avg Predicted IoU", f"{summary_stats['mean_predicted_iou']:.3f}")
+        with kpi_c4:
+            st.metric("Avg Stability", f"{summary_stats['mean_stability_score']:.3f}")
+
+        st.caption(f"📐 Resolution: `{summary_stats['image_resolution']}` | Coral Pixels: `{summary_stats['coral_covered_pixels']:,}`")
+
+        # 5. Detected Coral Segments Table
+        st.subheader("📑 Detected Coral Segments")
+        if masks_info:
+            df_records = []
+            for m in masks_info:
+                df_records.append({
+                    "ID": f"#{m['id']}",
+                    "Area (%)": f"{m['area_pct']}%",
+                    "IoU": m["predicted_iou"],
+                    "Stability": m["stability_score"],
+                    "BBox [x,y,w,h]": f"[{int(m['bbox'][0])}, {int(m['bbox'][1])}, {int(m['bbox'][2])}, {int(m['bbox'][3])}]",
+                })
+            df = pd.DataFrame(df_records)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No coral segments detected with current threshold settings.")
+
+        # 6. JSON Explorer & Downloads
+        with st.expander("🔍 Model Output Text Data (JSON)", expanded=False):
+            coco_dict = build_coco_json(
+                image_name=current_img_name,
+                width=current_image.width,
+                height=current_image.height,
+                masks_info=masks_info,
+            )
+            text_export = {
+                "summary": summary_stats,
+                "segments": [
+                    {k: v for k, v in m.items() if k not in ["mask", "color_rgb"]}
+                    for m in masks_info
+                ],
+            }
+            st.json(text_export)
+
+        st.subheader("💾 Export Results")
+        coco_json_str = json.dumps(coco_dict, indent=2)
+        st.download_button(
+            label="📥 Download COCO JSON",
+            data=coco_json_str,
+            file_name=f"{os.path.splitext(current_img_name)[0]}_coralscop_coco.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+
+        # Generate Overlay for Main View and Download
+        overlay_img_np = create_segmentation_overlay(
+            image=current_image,
+            masks_info=masks_info,
+            alpha=alpha_val,
+            draw_contours=draw_contours,
+            draw_labels=draw_labels,
+            draw_boxes=draw_boxes,
+            selected_mask_id=selected_mask_id,
+        )
+        overlay_pil = Image.fromarray(overlay_img_np)
+
+        buf = io.BytesIO()
+        overlay_pil.save(buf, format="PNG")
+        st.download_button(
+            label="🖼️ Download Segmented Image",
+            data=buf.getvalue(),
+            file_name=f"{os.path.splitext(current_img_name)[0]}_segmented.png",
+            mime="image/png",
+            use_container_width=True,
+        )
+
+    # ------------------ MAIN VIEW: IMAGES ONLY ------------------
     if view_mode == "Side-by-Side":
         col_orig, col_seg = st.columns(2)
         with col_orig:
@@ -385,97 +494,43 @@ def main():
         )
         st.image(Image.fromarray(mask_only_np), use_container_width=True)
 
-    # ------------------ SIDEBAR TEXT DATA & METRICS ------------------
+
+def main():
+    initialize_session_state()
+
+    # Hardware Info in Sidebar
     with st.sidebar:
-        st.header("📊 Coral Analysis & Model Data")
-
-        # KPI Metric Cards
-        kpi_c1, kpi_c2 = st.columns(2)
-        with kpi_c1:
-            st.markdown(
-                f"""
-                <div class='metric-card'>
-                    <div class='metric-card-val'>{summary_stats['total_corals_detected']}</div>
-                    <div class='metric-card-lbl'>Corals Found</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        with kpi_c2:
-            st.markdown(
-                f"""
-                <div class='metric-card'>
-                    <div class='metric-card-val'>{summary_stats['coral_coverage_pct']}%</div>
-                    <div class='metric-card-lbl'>Reef Coverage</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        kpi_c3, kpi_c4 = st.columns(2)
-        with kpi_c3:
-            st.metric("Avg Predicted IoU", f"{summary_stats['mean_predicted_iou']:.3f}")
-        with kpi_c4:
-            st.metric("Avg Stability", f"{summary_stats['mean_stability_score']:.3f}")
-
-        st.caption(f"📐 Resolution: `{summary_stats['image_resolution']}` | Coral Pixels: `{summary_stats['coral_covered_pixels']:,}`")
-
-        # Instance breakdown
-        st.subheader("📑 Detected Coral Segments")
-        if masks_info:
-            df_records = []
-            for m in masks_info:
-                df_records.append({
-                    "ID": f"#{m['id']}",
-                    "Area (%)": f"{m['area_pct']}%",
-                    "IoU": m["predicted_iou"],
-                    "Stability": m["stability_score"],
-                    "BBox [x,y,w,h]": f"[{int(m['bbox'][0])}, {int(m['bbox'][1])}, {int(m['bbox'][2])}, {int(m['bbox'][3])}]",
-                })
-            df = pd.DataFrame(df_records)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+        st.header("⚙️ Hardware Status")
+        device_info = get_device_info()
+        device_label = device_info.get("gpu_name", "CPU")
+        if device_info["cuda_available"]:
+            st.success(f"🚀 **CUDA GPU**: {device_label}")
+        elif device_info["mps_available"]:
+            st.info(f"⚡ **Apple Silicon**: {device_label}")
         else:
-            st.info("No coral segments detected with current threshold settings.")
+            st.warning(f"💻 **CPU Mode**: {device_label}")
 
-        # Full JSON Explorer
-        with st.expander("🔍 Model Output Text Data (JSON)", expanded=False):
-            coco_dict = build_coco_json(
-                image_name=current_img_name,
-                width=current_image.width,
-                height=current_image.height,
-                masks_info=masks_info,
-            )
-            # Display metadata summary
-            text_export = {
-                "summary": summary_stats,
-                "segments": [
-                    {k: v for k, v in m.items() if k not in ["mask", "color_rgb"]}
-                    for m in masks_info
-                ],
-            }
-            st.json(text_export)
-
-        # Download Actions
-        st.subheader("💾 Export Results")
-        coco_json_str = json.dumps(coco_dict, indent=2)
-        st.download_button(
-            label="📥 Download COCO JSON",
-            data=coco_json_str,
-            file_name=f"{os.path.splitext(current_img_name)[0]}_coralscop_coco.json",
-            mime="application/json",
-            use_container_width=True,
+        device_pref = st.selectbox(
+            "Device Preference",
+            options=["auto", "cuda", "mps", "cpu"],
+            index=0,
+            help="Prioritizes CUDA -> MPS -> CPU by default.",
         )
+        st.divider()
 
-        # Overlay image download
-        buf = io.BytesIO()
-        overlay_pil.save(buf, format="PNG")
-        st.download_button(
-            label="🖼️ Download Segmented Image",
-            data=buf.getvalue(),
-            file_name=f"{os.path.splitext(current_img_name)[0]}_segmented.png",
-            mime="image/png",
-            use_container_width=True,
-        )
+    # Load cached model
+    with st.spinner("Initializing CoralSCOP Foundation Model..."):
+        try:
+            model, _ = get_cached_model(device_pref)
+        except Exception as e:
+            st.error(f"Failed to load model: {e}")
+            return
+
+    # Render appropriate screen based on state
+    if st.session_state["app_stage"] == "upload":
+        render_upload_page()
+    else:
+        render_analysis_page(model)
 
 
 if __name__ == "__main__":
