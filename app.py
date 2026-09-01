@@ -93,7 +93,7 @@ def render_upload_page():
                 cols = st.columns(min(len(stage_images), 5))
                 for i, (fn, img) in enumerate(stage_images.items()):
                     with cols[i % len(cols)]:
-                        st.image(img.resize((160, 160)), caption=fn[:18] + "...", use_container_width=True)
+                        st.image(img.resize((160, 160)), caption=fn[:18] + "...", width="stretch")
 
     with tab_folder:
         st.markdown("#### Scan Local Directory")
@@ -122,7 +122,7 @@ def render_upload_page():
                 cols = st.columns(min(len(stage_images), 5))
                 for i, (fn, img) in enumerate(list(stage_images.items())[:5]):
                     with cols[i % len(cols)]:
-                        st.image(img.resize((160, 160)), caption=fn[:18] + "...", use_container_width=True)
+                        st.image(img.resize((160, 160)), caption=fn[:18] + "...", width="stretch")
             else:
                 st.info("No supported image files found in the directory.")
         elif folder_path:
@@ -141,7 +141,7 @@ def render_upload_page():
                     col = cols[i % len(cols)]
                     with col:
                         thumbnail = Image.open(df).resize((180, 180))
-                        col.image(thumbnail, caption=f"Sample #{i+1}", use_container_width=True)
+                        col.image(thumbnail, caption=f"Sample #{i+1}", width="stretch")
 
                 if st.button("🌊 Load All Sample Images for Analysis", type="primary"):
                     for df in demo_files:
@@ -157,7 +157,7 @@ def render_upload_page():
         st.divider()
         c_btn, _ = st.columns([2, 3])
         with c_btn:
-            if st.button(f"🚀 Analyze {len(stage_images)} Image(s) ➔", type="primary", use_container_width=True):
+            if st.button(f"🚀 Analyze {len(stage_images)} Image(s) ➔", type="primary", width="stretch"):
                 st.session_state["loaded_images"] = stage_images
                 st.session_state["selected_img_idx"] = 0
                 st.session_state["app_stage"] = "analysis"
@@ -182,49 +182,32 @@ def render_analysis_page(model):
     current_img_name = image_names[cur_idx]
     current_image = images_dict[current_img_name]
 
-    # ------------------ TOP BAR: BACK BUTTON & TITLE ONLY ------------------
-    top_c1, top_c2 = st.columns([1.6, 8.4], vertical_alignment="center")
+    # ------------------ TOP BAR: BACK BUTTON & FULL TITLE ------------------
+    top_c1, top_c2 = st.columns([1.8, 8.2], vertical_alignment="center")
     with top_c1:
-        if st.button("⬅ Back to Upload", use_container_width=True):
+        if st.button("⬅ Back to Upload", width="stretch", key="btn_back_to_upload"):
             st.session_state["app_stage"] = "upload"
             st.rerun()
     with top_c2:
         st.markdown(
-            f"<div class='image-title-bar'>🖼️ <b>{current_img_name}</b> "
-            f"<span style='color:#64748b; font-size:1rem; font-weight:normal;'>(Image {cur_idx + 1} of {total_images})</span></div>",
+            f"<div class='image-title-bar'>"
+            f"<span>🖼️</span> <span class='img-title-text'><b>{current_img_name}</b></span> "
+            f"<span class='img-badge-counter'>Image {cur_idx + 1} of {total_images}</span>"
+            f"</div>",
             unsafe_allow_html=True,
         )
 
-    # ------------------ DEDICATED CLEAN & SYMMETRICAL PAGINATION LINE ------------------
+    # ------------------ DEDICATED PAGINATION ROW (CENTERED) ------------------
     if total_images > 1:
-        btn_width = 0.55
-        prev_next_width = 0.95
-        center_width = prev_next_width * 2 + btn_width * total_images
-        margin = max((12.0 - center_width) / 2.0, 0.5)
-
-        cols_spec = [margin, prev_next_width] + [btn_width] * total_images + [prev_next_width, margin]
-        nav_cols = st.columns(cols_spec, vertical_alignment="center")
-
-        # Prev button
-        with nav_cols[1]:
-            if st.button("◀ Prev", disabled=(cur_idx == 0), use_container_width=True, key="btn_prev_nav"):
-                st.session_state["selected_img_idx"] = max(0, cur_idx - 1)
-                st.rerun()
-
-        # Number buttons (1, 2, 3, 4, 5, 6, 7...)
-        for i in range(total_images):
-            with nav_cols[2 + i]:
-                is_active = (i == cur_idx)
-                btn_type = "primary" if is_active else "secondary"
-                if st.button(f"{i + 1}", type=btn_type, use_container_width=True, key=f"btn_page_{i}"):
-                    if not is_active:
-                        st.session_state["selected_img_idx"] = i
-                        st.rerun()
-
-        # Next button
-        with nav_cols[2 + total_images]:
-            if st.button("Next ▶", disabled=(cur_idx >= total_images - 1), use_container_width=True, key="btn_next_nav"):
-                st.session_state["selected_img_idx"] = min(total_images - 1, cur_idx + 1)
+        _, pag_col, _ = st.columns([1, 4, 1])
+        with pag_col:
+            selected_page = st.pagination(
+                num_pages=total_images,
+                default=cur_idx + 1,
+                key=f"paginator_{total_images}",
+            )
+            if selected_page - 1 != cur_idx:
+                st.session_state["selected_img_idx"] = selected_page - 1
                 st.rerun()
 
     # ------------------ SIDEBAR CONTROLS & PARAMS ------------------
@@ -331,18 +314,18 @@ def render_analysis_page(model):
         col_orig, col_seg = st.columns(2, gap="medium")
         with col_orig:
             st.markdown("<div class='image-column-header'>📷 Original Coral Image</div>", unsafe_allow_html=True)
-            st.image(current_image, use_container_width=True)
+            st.image(current_image, width="stretch")
         with col_seg:
             st.markdown("<div class='image-column-header'>🎨 Segmentation Overlay</div>", unsafe_allow_html=True)
-            st.image(overlay_pil, use_container_width=True)
+            st.image(overlay_pil, width="stretch")
 
     elif view_mode == "Overlay Only":
         st.markdown("<div class='image-column-header'>🎨 CoralSCOP Segmentation Overlay</div>", unsafe_allow_html=True)
-        st.image(overlay_pil, use_container_width=True)
+        st.image(overlay_pil, width="stretch")
 
     elif view_mode == "Original Only":
         st.markdown("<div class='image-column-header'>📷 Original Coral Image</div>", unsafe_allow_html=True)
-        st.image(current_image, use_container_width=True)
+        st.image(current_image, width="stretch")
 
     elif view_mode == "Masks on Black":
         st.markdown("<div class='image-column-header'>⬛ Isolated Coral Masks</div>", unsafe_allow_html=True)
@@ -356,7 +339,7 @@ def render_analysis_page(model):
             draw_boxes=draw_boxes,
             selected_mask_id=selected_mask_id,
         )
-        st.image(Image.fromarray(mask_only_np), use_container_width=True)
+        st.image(Image.fromarray(mask_only_np), width="stretch")
 
     # ------------------ MAIN BOTTOM: CORAL ANALYSIS DASHBOARD ------------------
     st.divider()
@@ -423,7 +406,7 @@ def render_analysis_page(model):
                     "BBox [x,y,w,h]": f"[{int(m['bbox'][0])}, {int(m['bbox'][1])}, {int(m['bbox'][2])}, {int(m['bbox'][3])}]",
                 })
             df = pd.DataFrame(df_records)
-            st.dataframe(df, use_container_width=True, hide_index=True, height=280)
+            st.dataframe(df, width="stretch", hide_index=True, height=280)
         else:
             st.info("No coral segments detected with current threshold settings.")
 
@@ -448,7 +431,7 @@ def render_analysis_page(model):
                 data=coco_json_str,
                 file_name=f"{os.path.splitext(current_img_name)[0]}_coralscop_coco.json",
                 mime="application/json",
-                use_container_width=True,
+                width="stretch",
             )
         with exp_c2:
             st.download_button(
@@ -456,7 +439,7 @@ def render_analysis_page(model):
                 data=buf.getvalue(),
                 file_name=f"{os.path.splitext(current_img_name)[0]}_segmented.png",
                 mime="image/png",
-                use_container_width=True,
+                width="stretch",
             )
 
         with st.expander("🔍 Raw Model JSON Data", expanded=False):

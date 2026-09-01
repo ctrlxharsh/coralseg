@@ -17,11 +17,86 @@
 }
 
 .image-title-bar {
-    font-size: 1.25rem;
+    font-size: 1.15rem;
     font-weight: 600;
     color: #0f172a;
     margin: 0;
     padding: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.img-title-text {
+    word-break: break-word;
+}
+
+.img-badge-counter {
+    background-color: #e0f2fe;
+    color: #0369a1;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 9999px;
+    border: 1px solid #bae6fd;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Ensure buttons and pagination never wrap text and prevent clipping */
+div[data-testid="column"],
+div[data-testid="stHorizontalBlock"],
+div[data-testid="stVerticalBlockBorderWrapper"],
+div[data-testid="stVerticalBlock"],
+div[data-testid="stElementContainer"],
+div.stElementContainer,
+div.element-container {
+    overflow: visible !important;
+}
+
+div[data-testid="stHorizontalBlock"] {
+    align-items: center !important;
+}
+
+.stButton {
+    overflow: visible !important;
+    padding: 4px 0 !important;
+    margin: 4px 0 !important;
+}
+
+.stButton > button {
+    white-space: nowrap !important;
+    overflow: visible !important;
+    margin: 2px 0 !important;
+}
+
+/* Force pagination to center in row 2 */
+div[data-testid="stPagination"], .stPagination {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    width: 100% !important;
+    margin: 0.75rem auto 1.25rem auto !important;
+}
+
+div[data-testid="stPagination"] > ul,
+div[data-testid="stPagination"] > div,
+div[data-testid="stPagination"] nav {
+    margin: 0 auto !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+}
+
+div[data-testid="stPagination"] button {
+    white-space: nowrap !important;
+}
+
+/* Top container spacing - tight, clean clearance */
+.block-container {
+    padding-top: 3.5rem !important;
+    padding-bottom: 2rem !important;
 }
 
 .section-header {
