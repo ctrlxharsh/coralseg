@@ -2,7 +2,7 @@
 CoralSCOP - Coral Reef Segmentation Streamlit Studio
 Two-stage workflow: 
 1. Ingestion Page: Upload, Folder Scan, or Demo Samples
-2. Analysis Studio: Dedicated clean viewing space with unique standalone Prev/Next pagination line
+2. Analysis Studio: Dedicated clean viewing canvas with tight pagination and bottom analysis dashboard
 """
 
 import os
@@ -165,7 +165,7 @@ def render_upload_page():
 
 
 def render_analysis_page(model):
-    """Screen 2: Dedicated analysis studio with separate top bar, standalone pagination line, and clean image canvas."""
+    """Screen 2: Dedicated analysis studio with clean navigation, images, and bottom analysis dashboard."""
     images_dict = st.session_state.get("loaded_images", {})
     if not images_dict:
         st.session_state["app_stage"] = "upload"
@@ -183,7 +183,7 @@ def render_analysis_page(model):
     current_image = images_dict[current_img_name]
 
     # ------------------ TOP BAR: BACK BUTTON & TITLE ONLY ------------------
-    top_c1, top_c2 = st.columns([1.8, 8.2], vertical_alignment="center")
+    top_c1, top_c2 = st.columns([1.6, 8.4], vertical_alignment="center")
     with top_c1:
         if st.button("⬅ Back to Upload", use_container_width=True):
             st.session_state["app_stage"] = "upload"
@@ -195,10 +195,9 @@ def render_analysis_page(model):
             unsafe_allow_html=True,
         )
 
-    # ------------------ DEDICATED STANDALONE PAGINATION LINE ------------------
+    # ------------------ DEDICATED CLEAN PAGINATION LINE ------------------
     if total_images > 1:
-        st.markdown("<div class='pagination-wrapper'>", unsafe_allow_html=True)
-        _, nav_prev, nav_nums, nav_next, _ = st.columns([2.0, 1.2, 5.6, 1.2, 2.0], vertical_alignment="center")
+        _, nav_prev, nav_nums, nav_next, _ = st.columns([1.5, 0.9, 3.4, 0.9, 1.5], vertical_alignment="center")
 
         with nav_prev:
             if st.button("◀ Prev", disabled=(cur_idx == 0), use_container_width=True, key="nav_btn_prev"):
@@ -222,8 +221,6 @@ def render_analysis_page(model):
             if st.button("Next ▶", disabled=(cur_idx >= total_images - 1), use_container_width=True, key="nav_btn_next"):
                 st.session_state["selected_img_idx"] = min(total_images - 1, cur_idx + 1)
                 st.rerun()
-
-        st.markdown("</div>", unsafe_allow_html=True)
 
     # ------------------ SIDEBAR CONTROLS & PARAMS ------------------
     with st.sidebar:
@@ -312,126 +309,38 @@ def render_analysis_page(model):
             if selected_mask_option != "All Corals":
                 selected_mask_id = int(selected_mask_option.split("#")[1].split(" ")[0])
 
-        st.divider()
+    # Generate Overlay
+    overlay_img_np = create_segmentation_overlay(
+        image=current_image,
+        masks_info=masks_info,
+        alpha=alpha_val,
+        draw_contours=draw_contours,
+        draw_labels=draw_labels,
+        draw_boxes=draw_boxes,
+        selected_mask_id=selected_mask_id,
+    )
+    overlay_pil = Image.fromarray(overlay_img_np)
 
-        # 4. Coral Analysis Metrics
-        st.header("📊 Coral Analysis")
-        kpi_c1, kpi_c2 = st.columns(2)
-        with kpi_c1:
-            st.markdown(
-                f"""
-                <div class='metric-card'>
-                    <div class='metric-card-val'>{summary_stats['total_corals_detected']}</div>
-                    <div class='metric-card-lbl'>Corals Found</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        with kpi_c2:
-            st.markdown(
-                f"""
-                <div class='metric-card'>
-                    <div class='metric-card-val'>{summary_stats['coral_coverage_pct']}%</div>
-                    <div class='metric-card-lbl'>Reef Coverage</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        kpi_c3, kpi_c4 = st.columns(2)
-        with kpi_c3:
-            st.metric("Avg Predicted IoU", f"{summary_stats['mean_predicted_iou']:.3f}")
-        with kpi_c4:
-            st.metric("Avg Stability", f"{summary_stats['mean_stability_score']:.3f}")
-
-        st.caption(f"📐 Resolution: `{summary_stats['image_resolution']}` | Coral Pixels: `{summary_stats['coral_covered_pixels']:,}`")
-
-        # 5. Detected Coral Segments Table
-        st.subheader("📑 Detected Coral Segments")
-        if masks_info:
-            df_records = []
-            for m in masks_info:
-                df_records.append({
-                    "ID": f"#{m['id']}",
-                    "Area (%)": f"{m['area_pct']}%",
-                    "IoU": m["predicted_iou"],
-                    "Stability": m["stability_score"],
-                    "BBox [x,y,w,h]": f"[{int(m['bbox'][0])}, {int(m['bbox'][1])}, {int(m['bbox'][2])}, {int(m['bbox'][3])}]",
-                })
-            df = pd.DataFrame(df_records)
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        else:
-            st.info("No coral segments detected with current threshold settings.")
-
-        # 6. JSON Explorer & Downloads
-        with st.expander("🔍 Model Output Text Data (JSON)", expanded=False):
-            coco_dict = build_coco_json(
-                image_name=current_img_name,
-                width=current_image.width,
-                height=current_image.height,
-                masks_info=masks_info,
-            )
-            text_export = {
-                "summary": summary_stats,
-                "segments": [
-                    {k: v for k, v in m.items() if k not in ["mask", "color_rgb"]}
-                    for m in masks_info
-                ],
-            }
-            st.json(text_export)
-
-        st.subheader("💾 Export Results")
-        coco_json_str = json.dumps(coco_dict, indent=2)
-        st.download_button(
-            label="📥 Download COCO JSON",
-            data=coco_json_str,
-            file_name=f"{os.path.splitext(current_img_name)[0]}_coralscop_coco.json",
-            mime="application/json",
-            use_container_width=True,
-        )
-
-        # Generate Overlay for Main View and Download
-        overlay_img_np = create_segmentation_overlay(
-            image=current_image,
-            masks_info=masks_info,
-            alpha=alpha_val,
-            draw_contours=draw_contours,
-            draw_labels=draw_labels,
-            draw_boxes=draw_boxes,
-            selected_mask_id=selected_mask_id,
-        )
-        overlay_pil = Image.fromarray(overlay_img_np)
-
-        buf = io.BytesIO()
-        overlay_pil.save(buf, format="PNG")
-        st.download_button(
-            label="🖼️ Download Segmented Image",
-            data=buf.getvalue(),
-            file_name=f"{os.path.splitext(current_img_name)[0]}_segmented.png",
-            mime="image/png",
-            use_container_width=True,
-        )
-
-    # ------------------ MAIN VIEW: IMAGES ONLY ------------------
+    # ------------------ MAIN VIEW: IMAGES ------------------
     if view_mode == "Side-by-Side":
         col_orig, col_seg = st.columns(2, gap="medium")
         with col_orig:
-            st.markdown("### 📷 Original Coral Image")
+            st.markdown("<div class='image-column-header'>📷 Original Coral Image</div>", unsafe_allow_html=True)
             st.image(current_image, use_container_width=True)
         with col_seg:
-            st.markdown("### 🎨 CoralSCOP Segmentation Overlay")
+            st.markdown("<div class='image-column-header'>🎨 Segmentation Overlay</div>", unsafe_allow_html=True)
             st.image(overlay_pil, use_container_width=True)
 
     elif view_mode == "Overlay Only":
-        st.markdown("### 🎨 CoralSCOP Segmentation Overlay")
+        st.markdown("<div class='image-column-header'>🎨 CoralSCOP Segmentation Overlay</div>", unsafe_allow_html=True)
         st.image(overlay_pil, use_container_width=True)
 
     elif view_mode == "Original Only":
-        st.markdown("### 📷 Original Coral Image")
+        st.markdown("<div class='image-column-header'>📷 Original Coral Image</div>", unsafe_allow_html=True)
         st.image(current_image, use_container_width=True)
 
     elif view_mode == "Masks on Black":
-        st.markdown("### ⬛ Isolated Coral Masks")
+        st.markdown("<div class='image-column-header'>⬛ Isolated Coral Masks</div>", unsafe_allow_html=True)
         black_bg = np.zeros_like(np.array(current_image))
         mask_only_np = create_segmentation_overlay(
             image=black_bg,
@@ -443,6 +352,117 @@ def render_analysis_page(model):
             selected_mask_id=selected_mask_id,
         )
         st.image(Image.fromarray(mask_only_np), use_container_width=True)
+
+    # ------------------ MAIN BOTTOM: CORAL ANALYSIS DASHBOARD ------------------
+    st.divider()
+    st.markdown("<div class='section-header'>📊 Coral Analysis & Model Statistics</div>", unsafe_allow_html=True)
+
+    # 1. KPI Cards Row
+    kpi_c1, kpi_c2, kpi_c3, kpi_c4 = st.columns(4)
+    with kpi_c1:
+        st.markdown(
+            f"""
+            <div class='metric-card'>
+                <div class='metric-card-val'>{summary_stats['total_corals_detected']}</div>
+                <div class='metric-card-lbl'>Corals Found</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with kpi_c2:
+        st.markdown(
+            f"""
+            <div class='metric-card'>
+                <div class='metric-card-val'>{summary_stats['coral_coverage_pct']}%</div>
+                <div class='metric-card-lbl'>Reef Coverage</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with kpi_c3:
+        st.markdown(
+            f"""
+            <div class='metric-card'>
+                <div class='metric-card-val'>{summary_stats['mean_predicted_iou']:.3f}</div>
+                <div class='metric-card-lbl'>Avg Predicted IoU</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with kpi_c4:
+        st.markdown(
+            f"""
+            <div class='metric-card'>
+                <div class='metric-card-val'>{summary_stats['mean_stability_score']:.3f}</div>
+                <div class='metric-card-lbl'>Avg Stability</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # 2. Detailed Breakdown Table & Export Options
+    col_table, col_export = st.columns([5.8, 4.2], gap="large")
+
+    with col_table:
+        st.markdown("#### 📑 Detected Coral Segments Breakdown")
+        st.caption(f"📐 Resolution: `{summary_stats['image_resolution']}` | Coral Pixels: `{summary_stats['coral_covered_pixels']:,}`")
+
+        if masks_info:
+            df_records = []
+            for m in masks_info:
+                df_records.append({
+                    "ID": f"#{m['id']}",
+                    "Area (%)": f"{m['area_pct']}%",
+                    "IoU Score": m["predicted_iou"],
+                    "Stability": m["stability_score"],
+                    "BBox [x,y,w,h]": f"[{int(m['bbox'][0])}, {int(m['bbox'][1])}, {int(m['bbox'][2])}, {int(m['bbox'][3])}]",
+                })
+            df = pd.DataFrame(df_records)
+            st.dataframe(df, use_container_width=True, hide_index=True, height=280)
+        else:
+            st.info("No coral segments detected with current threshold settings.")
+
+    with col_export:
+        st.markdown("#### 💾 Export & Data Inspector")
+
+        coco_dict = build_coco_json(
+            image_name=current_img_name,
+            width=current_image.width,
+            height=current_image.height,
+            masks_info=masks_info,
+        )
+        coco_json_str = json.dumps(coco_dict, indent=2)
+
+        buf = io.BytesIO()
+        overlay_pil.save(buf, format="PNG")
+
+        exp_c1, exp_c2 = st.columns(2)
+        with exp_c1:
+            st.download_button(
+                label="📥 Download COCO JSON",
+                data=coco_json_str,
+                file_name=f"{os.path.splitext(current_img_name)[0]}_coralscop_coco.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+        with exp_c2:
+            st.download_button(
+                label="🖼️ Download Overlay PNG",
+                data=buf.getvalue(),
+                file_name=f"{os.path.splitext(current_img_name)[0]}_segmented.png",
+                mime="image/png",
+                use_container_width=True,
+            )
+
+        with st.expander("🔍 Raw Model JSON Data", expanded=False):
+            text_export = {
+                "summary": summary_stats,
+                "segments": [
+                    {k: v for k, v in m.items() if k not in ["mask", "color_rgb"]}
+                    for m in masks_info
+                ],
+            }
+            st.json(text_export)
 
 
 def main():

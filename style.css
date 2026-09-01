@@ -24,24 +24,28 @@
     padding: 0;
 }
 
-/* Metric KPI Cards */
-.metric-card {
-    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-    border: 1px solid #bae6fd;
-    border-radius: 10px;
-    padding: 14px;
-    text-align: center;
-    margin-bottom: 10px;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
+.section-header {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #0f172a;
+    margin: 1.5rem 0 0.8rem 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
-.metric-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05);
+/* Metric KPI Cards (Modern flat with subtle tint) */
+.metric-card {
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+    margin-bottom: 12px;
 }
 
 .metric-card-val {
-    font-size: 1.7rem;
+    font-size: 1.8rem;
     font-weight: 700;
     color: #0369a1;
 }
@@ -52,18 +56,22 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    margin-top: 4px;
 }
 
-/* Pagination & Navigation Bars */
-.pagination-wrapper {
-    background-color: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 8px 16px;
-    margin: 12px 0 20px 0;
-    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.03);
+/* Clean Column Headers for Images */
+.image-column-header {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: #1e293b;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
 }
 
+/* Badges */
 .img-badge {
     background-color: #f1f5f9;
     border: 1px solid #e2e8f0;
@@ -75,16 +83,6 @@
     display: inline-block;
 }
 
-/* Upload Container */
-.upload-card {
-    background: #f8fafc;
-    border: 1px dashed #cbd5e1;
-    border-radius: 12px;
-    padding: 24px;
-    text-align: center;
-}
-
-/* Custom Badges */
 .badge {
     display: inline-block;
     padding: 2px 8px;
