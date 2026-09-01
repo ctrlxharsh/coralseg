@@ -31,59 +31,14 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS styling for modern studio feel
-st.markdown(
-    """
-    <style>
-    .main-title {
-        font-size: 2.2rem;
-        font-weight: 700;
-        color: #0e7490;
-        margin-bottom: 0.2rem;
-    }
-    .sub-title {
-        font-size: 1rem;
-        color: #64748b;
-        margin-bottom: 1.2rem;
-    }
-    .metric-card {
-        background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-        border: 1px solid #bae6fd;
-        border-radius: 10px;
-        padding: 14px;
-        text-align: center;
-        margin-bottom: 10px;
-    }
-    .metric-card-val {
-        font-size: 1.7rem;
-        font-weight: 700;
-        color: #0369a1;
-    }
-    .metric-card-lbl {
-        font-size: 0.8rem;
-        color: #0284c7;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    .image-title-bar {
-        font-size: 1.25rem;
-        font-weight: 600;
-        color: #0f172a;
-        margin: 0;
-        padding: 0;
-    }
-    .pagination-wrapper {
-        background-color: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 8px 16px;
-        margin: 12px 0 20px 0;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# Load external global CSS
+def load_css(css_file: str = "style.css"):
+    css_path = os.path.join(os.path.dirname(__file__), css_file)
+    if os.path.exists(css_path):
+        with open(css_path, "r", encoding="utf-8") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+load_css("style.css")
 
 
 @st.cache_resource(show_spinner=False)
