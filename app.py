@@ -29,7 +29,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS styling for polished theme
+# Custom CSS styling for polished theme and compact toolbar
 st.markdown(
     """
     <style>
@@ -42,7 +42,7 @@ st.markdown(
     .sub-title {
         font-size: 1rem;
         color: #64748b;
-        margin-bottom: 1.5rem;
+        margin-bottom: 1.2rem;
     }
     .metric-card {
         background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
@@ -64,17 +64,19 @@ st.markdown(
         text-transform: uppercase;
         letter-spacing: 0.5px;
     }
-    .badge {
-        display: inline-block;
-        padding: 2px 8px;
+    .toolbar-container {
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
         border-radius: 12px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        margin-right: 5px;
+        padding: 12px 18px 8px 18px;
+        margin-bottom: 15px;
     }
-    .badge-coral {
-        background-color: #fef08a;
-        color: #854d0e;
+    .pagination-bar {
+        background-color: #f1f5f9;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 8px 14px;
+        margin-bottom: 14px;
     }
     </style>
     """,
@@ -224,37 +226,79 @@ def main():
                         thumbnail = Image.open(df).resize((180, 180))
                         col.image(thumbnail, caption=fn[:20] + "...", use_container_width=True)
                         if col.button(f"Select #{i+1}", key=f"btn_demo_{i}"):
-                            st.session_state["active_image_name"] = fn
-                            st.session_state["demo_active_img"] = Image.open(df).convert("RGB")
+                            st.session_state["selected_img_idx"] = i
+                            st.session_state["active_demo_list"] = demo_files
                             st.rerun()
 
-                if "demo_active_img" in st.session_state:
-                    selected_images[st.session_state.get("active_image_name", "demo_sample.jpg")] = st.session_state["demo_active_img"]
+                # Populate all demo files so pagination works across all demo images
+                for df in demo_files:
+                    fn = os.path.basename(df)
+                    selected_images[fn] = Image.open(df).convert("RGB")
 
     if not selected_images:
         st.info("👈 Please upload an image, specify a folder path, or select a sample image above to start segmentation.")
         return
 
-    # Image Selector if multiple images available
+    # ------------------ PAGINATION BAR (PREV 1 2 3 4 NEXT) ------------------
     image_names = list(selected_images.keys())
-    if len(image_names) > 1:
-        current_img_name = st.selectbox("Select Active Image to Analyze:", image_names)
+    total_images = len(image_names)
+
+    if total_images > 1:
+        if "selected_img_idx" not in st.session_state or st.session_state["selected_img_idx"] >= total_images:
+            st.session_state["selected_img_idx"] = 0
+
+        cur_idx = st.session_state["selected_img_idx"]
+
+        # Render pagination bar with Prev, Numbers (1, 2, 3, 4...), Next
+        st.markdown("<div class='pagination-bar'>", unsafe_allow_html=True)
+        nav_prev, nav_pages, nav_next, nav_info = st.columns([1.1, 4.5, 1.1, 3.3], vertical_alignment="center")
+
+        with nav_prev:
+            if st.button("◀ Prev", disabled=(cur_idx == 0), use_container_width=True, key="btn_prev_img"):
+                st.session_state["selected_img_idx"] = max(0, cur_idx - 1)
+                st.rerun()
+
+        with nav_pages:
+            page_options = [f"{i+1}" for i in range(total_images)]
+            # Use st.segmented_control for sleek button-like toggle
+            selected_page = st.segmented_control(
+                "Image Page",
+                options=page_options,
+                default=page_options[cur_idx],
+                label_visibility="collapsed",
+                key="img_pagination_control",
+            )
+            if selected_page and int(selected_page) - 1 != cur_idx:
+                st.session_state["selected_img_idx"] = int(selected_page) - 1
+                st.rerun()
+
+        with nav_next:
+            if st.button("Next ▶", disabled=(cur_idx >= total_images - 1), use_container_width=True, key="btn_next_img"):
+                st.session_state["selected_img_idx"] = min(total_images - 1, cur_idx + 1)
+                st.rerun()
+
+        with nav_info:
+            st.markdown(f"**Image {cur_idx + 1} of {total_images}**: `{image_names[cur_idx]}`")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+        current_img_name = image_names[st.session_state["selected_img_idx"]]
     else:
         current_img_name = image_names[0]
 
     current_image = selected_images[current_img_name]
 
-    st.divider()
-
     # ------------------ SEGMENTATION EXECUTION ------------------
-    # Cache key for session state
     seg_cache_key = f"seg_{current_img_name}_{points_per_side}_{iou_thresh}_{stability_thresh}_{min_area_px}"
 
-    col_btn, col_msg = st.columns([1, 4])
+    col_btn, col_info_msg = st.columns([1.2, 4.8], vertical_alignment="center")
     with col_btn:
         run_btn = st.button("🚀 Segment Image", type="primary", use_container_width=True)
+    with col_info_msg:
+        if seg_cache_key in st.session_state:
+            found_cnt = st.session_state[seg_cache_key]["summary_stats"]["total_corals_detected"]
+            cov_pct = st.session_state[seg_cache_key]["summary_stats"]["coral_coverage_pct"]
+            st.caption(f"✅ Segmented: **{found_cnt} coral instances** detected ({cov_pct}% reef coverage). Click button to re-run.")
 
-    # Auto-run if first time on this image or button pressed
     if run_btn or seg_cache_key not in st.session_state:
         with st.spinner(f"Analyzing and segmenting '{current_img_name}' with CoralSCOP..."):
             img_np = np.array(current_image)
@@ -275,22 +319,45 @@ def main():
     masks_info = seg_result["masks_info"]
     summary_stats = seg_result["summary_stats"]
 
-    # ------------------ VISUALIZATION CONTROLS ------------------
-    ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4, ctrl_c5 = st.columns([2, 1, 1, 1, 2])
-    with ctrl_c1:
-        alpha_val = st.slider("Overlay Transparency (Alpha)", min_value=0.1, max_value=0.9, value=0.45, step=0.05)
-    with ctrl_c2:
-        draw_contours = st.checkbox("Borders", value=True, help="Draw sharp contour borders around corals")
-    with ctrl_c3:
-        draw_labels = st.checkbox("ID Badges", value=True, help="Display segment ID numbers at centroids")
-    with ctrl_c4:
-        draw_boxes = st.checkbox("Bounding Boxes", value=False, help="Show bounding box rectangles")
-    with ctrl_c5:
+    # ------------------ UNIFIED SIDE-BY-SIDE CONTROLS TOOLBAR ------------------
+    st.markdown("<div class='toolbar-container'>", unsafe_allow_html=True)
+    tb_c1, tb_c2, tb_c3, tb_c4, tb_c5 = st.columns([3.2, 2.2, 2.2, 1.2, 2.2], vertical_alignment="center")
+
+    with tb_c1:
+        st.markdown("**Layout View**")
+        view_mode = st.segmented_control(
+            "Display Layout",
+            options=["Side-by-Side", "Overlay Only", "Original Only", "Masks on Black"],
+            default="Side-by-Side",
+            label_visibility="collapsed",
+            key="view_mode_segmented",
+        )
+        if not view_mode:
+            view_mode = "Side-by-Side"
+
+    with tb_c2:
+        alpha_val = st.slider("Transparency (Alpha)", min_value=0.1, max_value=0.9, value=0.45, step=0.05)
+
+    with tb_c3:
+        st.markdown("**Overlays**")
+        chk_col1, chk_col2 = st.columns(2)
+        with chk_col1:
+            draw_contours = st.checkbox("Borders", value=True, help="Draw sharp contour borders around corals")
+        with chk_col2:
+            draw_labels = st.checkbox("ID Badges", value=True, help="Display segment ID numbers at centroids")
+
+    with tb_c4:
+        st.markdown("&nbsp;")
+        draw_boxes = st.checkbox("Boxes", value=False, help="Show bounding box rectangles")
+
+    with tb_c5:
         mask_options = ["All Corals"] + [f"Coral #{m['id']} ({m['area_pct']}% area)" for m in masks_info]
-        selected_mask_option = st.selectbox("Highlight Specific Segment", options=mask_options, index=0)
+        selected_mask_option = st.selectbox("Highlight Segment", options=mask_options, index=0)
         selected_mask_id = None
         if selected_mask_option != "All Corals":
             selected_mask_id = int(selected_mask_option.split("#")[1].split(" ")[0])
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # Generate Overlay
     overlay_img_np = create_segmentation_overlay(
@@ -305,8 +372,6 @@ def main():
     overlay_pil = Image.fromarray(overlay_img_np)
 
     # ------------------ MAIN VIEW (ORIGINAL VS OVERLAY) ------------------
-    view_mode = st.radio("Display Layout", ["Side-by-Side", "Overlay Only", "Original Only", "Masks on Black"], horizontal=True)
-
     if view_mode == "Side-by-Side":
         col_orig, col_seg = st.columns(2)
         with col_orig:
