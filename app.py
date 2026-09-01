@@ -29,7 +29,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS styling for polished theme and compact toolbar
+# Custom CSS styling for polished theme
 st.markdown(
     """
     <style>
@@ -64,19 +64,13 @@ st.markdown(
         text-transform: uppercase;
         letter-spacing: 0.5px;
     }
-    .toolbar-container {
-        background-color: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 12px 18px 8px 18px;
-        margin-bottom: 15px;
-    }
     .pagination-bar {
-        background-color: #f1f5f9;
+        background-color: #f8fafc;
         border: 1px solid #e2e8f0;
         border-radius: 10px;
         padding: 8px 14px;
-        margin-bottom: 14px;
+        margin-top: 10px;
+        margin-bottom: 15px;
     }
     </style>
     """,
@@ -101,12 +95,11 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # ------------------ SIDEBAR ------------------
+    # ------------------ SIDEBAR: HARDWARE & MODEL CONFIG ------------------
     with st.sidebar:
         st.header("⚙️ Model & Hardware")
         device_info = get_device_info()
 
-        # Device status pill
         device_label = device_info.get("gpu_name", "CPU")
         if device_info["cuda_available"]:
             st.success(f"🚀 **CUDA GPU**: {device_label}")
@@ -227,7 +220,6 @@ def main():
                         col.image(thumbnail, caption=fn[:20] + "...", use_container_width=True)
                         if col.button(f"Select #{i+1}", key=f"btn_demo_{i}"):
                             st.session_state["selected_img_idx"] = i
-                            st.session_state["active_demo_list"] = demo_files
                             st.rerun()
 
                 # Populate all demo files so pagination works across all demo images
@@ -260,7 +252,6 @@ def main():
 
         with nav_pages:
             page_options = [f"{i+1}" for i in range(total_images)]
-            # Use st.segmented_control for sleek button-like toggle
             selected_page = st.segmented_control(
                 "Image Page",
                 options=page_options,
@@ -319,45 +310,36 @@ def main():
     masks_info = seg_result["masks_info"]
     summary_stats = seg_result["summary_stats"]
 
-    # ------------------ UNIFIED SIDE-BY-SIDE CONTROLS TOOLBAR ------------------
-    st.markdown("<div class='toolbar-container'>", unsafe_allow_html=True)
-    tb_c1, tb_c2, tb_c3, tb_c4, tb_c5 = st.columns([3.2, 2.2, 2.2, 1.2, 2.2], vertical_alignment="center")
+    # ------------------ SIDEBAR: COLLAPSIBLE DISPLAY & OVERLAY CONTROLS ------------------
+    with st.sidebar:
+        with st.expander("🎨 Display & Overlay Controls", expanded=True):
+            st.markdown("**Layout View**")
+            view_mode = st.segmented_control(
+                "Display Layout",
+                options=["Side-by-Side", "Overlay Only", "Original Only", "Masks on Black"],
+                default="Side-by-Side",
+                label_visibility="collapsed",
+                key="view_mode_segmented",
+            )
+            if not view_mode:
+                view_mode = "Side-by-Side"
 
-    with tb_c1:
-        st.markdown("**Layout View**")
-        view_mode = st.segmented_control(
-            "Display Layout",
-            options=["Side-by-Side", "Overlay Only", "Original Only", "Masks on Black"],
-            default="Side-by-Side",
-            label_visibility="collapsed",
-            key="view_mode_segmented",
-        )
-        if not view_mode:
-            view_mode = "Side-by-Side"
+            alpha_val = st.slider("Overlay Transparency (Alpha)", min_value=0.1, max_value=0.9, value=0.45, step=0.05)
 
-    with tb_c2:
-        alpha_val = st.slider("Transparency (Alpha)", min_value=0.1, max_value=0.9, value=0.45, step=0.05)
+            chk_c1, chk_c2 = st.columns(2)
+            with chk_c1:
+                draw_contours = st.checkbox("Borders", value=True, help="Draw sharp contour borders around corals")
+                draw_labels = st.checkbox("ID Badges", value=True, help="Display segment ID numbers at centroids")
+            with chk_c2:
+                draw_boxes = st.checkbox("Bounding Boxes", value=False, help="Show bounding box rectangles")
 
-    with tb_c3:
-        st.markdown("**Overlays**")
-        chk_col1, chk_col2 = st.columns(2)
-        with chk_col1:
-            draw_contours = st.checkbox("Borders", value=True, help="Draw sharp contour borders around corals")
-        with chk_col2:
-            draw_labels = st.checkbox("ID Badges", value=True, help="Display segment ID numbers at centroids")
+            mask_options = ["All Corals"] + [f"Coral #{m['id']} ({m['area_pct']}% area)" for m in masks_info]
+            selected_mask_option = st.selectbox("Highlight Specific Segment", options=mask_options, index=0)
+            selected_mask_id = None
+            if selected_mask_option != "All Corals":
+                selected_mask_id = int(selected_mask_option.split("#")[1].split(" ")[0])
 
-    with tb_c4:
-        st.markdown("&nbsp;")
-        draw_boxes = st.checkbox("Boxes", value=False, help="Show bounding box rectangles")
-
-    with tb_c5:
-        mask_options = ["All Corals"] + [f"Coral #{m['id']} ({m['area_pct']}% area)" for m in masks_info]
-        selected_mask_option = st.selectbox("Highlight Segment", options=mask_options, index=0)
-        selected_mask_id = None
-        if selected_mask_option != "All Corals":
-            selected_mask_id = int(selected_mask_option.split("#")[1].split(" ")[0])
-
-    st.markdown("</div>", unsafe_allow_html=True)
+        st.divider()
 
     # Generate Overlay
     overlay_img_np = create_segmentation_overlay(
