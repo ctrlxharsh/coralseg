@@ -2,7 +2,7 @@
 CoralSCOP - Coral Reef Segmentation Streamlit Studio
 Two-stage workflow: 
 1. Ingestion Page: Upload, Folder Scan, or Demo Samples
-2. Analysis Studio: Dedicated clean viewing space with Prev/Next pagination and sidebar analytics
+2. Analysis Studio: Dedicated clean viewing space with unique standalone Prev/Next pagination line
 """
 
 import os
@@ -66,30 +66,19 @@ st.markdown(
         text-transform: uppercase;
         letter-spacing: 0.5px;
     }
-    .nav-header-box {
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05);
-        border-radius: 12px;
-        padding: 10px 16px;
-        margin-bottom: 16px;
-    }
-    .upload-card {
-        background: #f8fafc;
-        border: 1px dashed #cbd5e1;
-        border-radius: 12px;
-        padding: 24px;
-        text-align: center;
-    }
-    .img-badge {
-        background-color: #f1f5f9;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        padding: 6px 12px;
-        font-size: 0.9rem;
+    .image-title-bar {
+        font-size: 1.25rem;
         font-weight: 600;
-        color: #334155;
-        display: inline-block;
+        color: #0f172a;
+        margin: 0;
+        padding: 0;
+    }
+    .pagination-wrapper {
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 8px 16px;
+        margin: 12px 0 20px 0;
     }
     </style>
     """,
@@ -221,7 +210,7 @@ def render_upload_page():
 
 
 def render_analysis_page(model):
-    """Screen 2: Dedicated analysis & pagination view with images and clean controls."""
+    """Screen 2: Dedicated analysis studio with separate top bar, standalone pagination line, and clean image canvas."""
     images_dict = st.session_state.get("loaded_images", {})
     if not images_dict:
         st.session_state["app_stage"] = "upload"
@@ -238,42 +227,48 @@ def render_analysis_page(model):
     current_img_name = image_names[cur_idx]
     current_image = images_dict[current_img_name]
 
-    # ------------------ TOP NAVIGATION HEADER ------------------
-    nav_col_back, nav_col_pages, nav_col_info = st.columns([1.6, 5.4, 3.0], vertical_alignment="center")
-
-    with nav_col_back:
+    # ------------------ TOP BAR: BACK BUTTON & TITLE ONLY ------------------
+    top_c1, top_c2 = st.columns([1.8, 8.2], vertical_alignment="center")
+    with top_c1:
         if st.button("⬅ Back to Upload", use_container_width=True):
             st.session_state["app_stage"] = "upload"
             st.rerun()
+    with top_c2:
+        st.markdown(
+            f"<div class='image-title-bar'>🖼️ <b>{current_img_name}</b> "
+            f"<span style='color:#64748b; font-size:1rem; font-weight:normal;'>(Image {cur_idx + 1} of {total_images})</span></div>",
+            unsafe_allow_html=True,
+        )
 
-    with nav_col_pages:
-        if total_images > 1:
-            p_prev, p_nums, p_next = st.columns([1.1, 4.8, 1.1], vertical_alignment="center")
-            with p_prev:
-                if st.button("◀ Prev", disabled=(cur_idx == 0), use_container_width=True, key="p_btn_prev"):
-                    st.session_state["selected_img_idx"] = max(0, cur_idx - 1)
-                    st.rerun()
+    # ------------------ DEDICATED STANDALONE PAGINATION LINE ------------------
+    if total_images > 1:
+        st.markdown("<div class='pagination-wrapper'>", unsafe_allow_html=True)
+        _, nav_prev, nav_nums, nav_next, _ = st.columns([2.0, 1.2, 5.6, 1.2, 2.0], vertical_alignment="center")
 
-            with p_nums:
-                page_options = [f"{i+1}" for i in range(total_images)]
-                selected_page = st.segmented_control(
-                    "Image Navigation",
-                    options=page_options,
-                    default=page_options[cur_idx],
-                    label_visibility="collapsed",
-                    key="p_nav_segmented",
-                )
-                if selected_page and int(selected_page) - 1 != cur_idx:
-                    st.session_state["selected_img_idx"] = int(selected_page) - 1
-                    st.rerun()
+        with nav_prev:
+            if st.button("◀ Prev", disabled=(cur_idx == 0), use_container_width=True, key="nav_btn_prev"):
+                st.session_state["selected_img_idx"] = max(0, cur_idx - 1)
+                st.rerun()
 
-            with p_next:
-                if st.button("Next ▶", disabled=(cur_idx >= total_images - 1), use_container_width=True, key="p_btn_next"):
-                    st.session_state["selected_img_idx"] = min(total_images - 1, cur_idx + 1)
-                    st.rerun()
+        with nav_nums:
+            page_options = [f"{i+1}" for i in range(total_images)]
+            selected_page = st.segmented_control(
+                "Image Page Navigation",
+                options=page_options,
+                default=page_options[cur_idx],
+                label_visibility="collapsed",
+                key="nav_page_segmented",
+            )
+            if selected_page and int(selected_page) - 1 != cur_idx:
+                st.session_state["selected_img_idx"] = int(selected_page) - 1
+                st.rerun()
 
-    with nav_col_info:
-        st.markdown(f"<div class='img-badge'>🖼️ <b>Image {cur_idx + 1} of {total_images}</b>: {current_img_name}</div>", unsafe_allow_html=True)
+        with nav_next:
+            if st.button("Next ▶", disabled=(cur_idx >= total_images - 1), use_container_width=True, key="nav_btn_next"):
+                st.session_state["selected_img_idx"] = min(total_images - 1, cur_idx + 1)
+                st.rerun()
+
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # ------------------ SIDEBAR CONTROLS & PARAMS ------------------
     with st.sidebar:
@@ -464,24 +459,24 @@ def render_analysis_page(model):
 
     # ------------------ MAIN VIEW: IMAGES ONLY ------------------
     if view_mode == "Side-by-Side":
-        col_orig, col_seg = st.columns(2)
+        col_orig, col_seg = st.columns(2, gap="medium")
         with col_orig:
-            st.subheader("📷 Original Coral Image")
+            st.markdown("### 📷 Original Coral Image")
             st.image(current_image, use_container_width=True)
         with col_seg:
-            st.subheader("🎨 CoralSCOP Segmentation Overlay")
+            st.markdown("### 🎨 CoralSCOP Segmentation Overlay")
             st.image(overlay_pil, use_container_width=True)
 
     elif view_mode == "Overlay Only":
-        st.subheader("🎨 CoralSCOP Segmentation Overlay")
+        st.markdown("### 🎨 CoralSCOP Segmentation Overlay")
         st.image(overlay_pil, use_container_width=True)
 
     elif view_mode == "Original Only":
-        st.subheader("📷 Original Coral Image")
+        st.markdown("### 📷 Original Coral Image")
         st.image(current_image, use_container_width=True)
 
     elif view_mode == "Masks on Black":
-        st.subheader("⬛ Isolated Coral Masks")
+        st.markdown("### ⬛ Isolated Coral Masks")
         black_bg = np.zeros_like(np.array(current_image))
         mask_only_np = create_segmentation_overlay(
             image=black_bg,
