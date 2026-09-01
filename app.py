@@ -195,30 +195,35 @@ def render_analysis_page(model):
             unsafe_allow_html=True,
         )
 
-    # ------------------ DEDICATED CLEAN PAGINATION LINE ------------------
+    # ------------------ DEDICATED CLEAN & SYMMETRICAL PAGINATION LINE ------------------
     if total_images > 1:
-        _, nav_prev, nav_nums, nav_next, _ = st.columns([1.5, 0.9, 3.4, 0.9, 1.5], vertical_alignment="center")
+        btn_width = 0.55
+        prev_next_width = 0.95
+        center_width = prev_next_width * 2 + btn_width * total_images
+        margin = max((12.0 - center_width) / 2.0, 0.5)
 
-        with nav_prev:
-            if st.button("◀ Prev", disabled=(cur_idx == 0), use_container_width=True, key="nav_btn_prev"):
+        cols_spec = [margin, prev_next_width] + [btn_width] * total_images + [prev_next_width, margin]
+        nav_cols = st.columns(cols_spec, vertical_alignment="center")
+
+        # Prev button
+        with nav_cols[1]:
+            if st.button("◀ Prev", disabled=(cur_idx == 0), use_container_width=True, key="btn_prev_nav"):
                 st.session_state["selected_img_idx"] = max(0, cur_idx - 1)
                 st.rerun()
 
-        with nav_nums:
-            page_options = [f"{i+1}" for i in range(total_images)]
-            selected_page = st.segmented_control(
-                "Image Page Navigation",
-                options=page_options,
-                default=page_options[cur_idx],
-                label_visibility="collapsed",
-                key="nav_page_segmented",
-            )
-            if selected_page and int(selected_page) - 1 != cur_idx:
-                st.session_state["selected_img_idx"] = int(selected_page) - 1
-                st.rerun()
+        # Number buttons (1, 2, 3, 4, 5, 6, 7...)
+        for i in range(total_images):
+            with nav_cols[2 + i]:
+                is_active = (i == cur_idx)
+                btn_type = "primary" if is_active else "secondary"
+                if st.button(f"{i + 1}", type=btn_type, use_container_width=True, key=f"btn_page_{i}"):
+                    if not is_active:
+                        st.session_state["selected_img_idx"] = i
+                        st.rerun()
 
-        with nav_next:
-            if st.button("Next ▶", disabled=(cur_idx >= total_images - 1), use_container_width=True, key="nav_btn_next"):
+        # Next button
+        with nav_cols[2 + total_images]:
+            if st.button("Next ▶", disabled=(cur_idx >= total_images - 1), use_container_width=True, key="btn_next_nav"):
                 st.session_state["selected_img_idx"] = min(total_images - 1, cur_idx + 1)
                 st.rerun()
 
