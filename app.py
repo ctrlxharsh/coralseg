@@ -199,12 +199,18 @@ def render_analysis_page(model):
 
     # ------------------ DEDICATED PAGINATION ROW (CENTERED) ------------------
     if total_images > 1:
+        def _on_page_change():
+            pag_key = f"paginator_{total_images}"
+            if pag_key in st.session_state:
+                st.session_state["selected_img_idx"] = st.session_state[pag_key] - 1
+
         _, pag_col, _ = st.columns([1, 4, 1])
         with pag_col:
             selected_page = st.pagination(
                 num_pages=total_images,
                 default=cur_idx + 1,
                 key=f"paginator_{total_images}",
+                on_change=_on_page_change,
             )
             if selected_page - 1 != cur_idx:
                 st.session_state["selected_img_idx"] = selected_page - 1
@@ -220,6 +226,8 @@ def render_analysis_page(model):
                 max_value=48,
                 value=24,
                 step=4,
+                key="param_points_per_side",
+                persist_state="session",
                 help="Higher values detect smaller coral instances but take longer to process.",
             )
             iou_thresh = st.slider(
@@ -228,6 +236,8 @@ def render_analysis_page(model):
                 max_value=0.98,
                 value=0.86,
                 step=0.02,
+                key="param_iou_thresh",
+                persist_state="session",
                 help="Filters masks with low model predicted quality.",
             )
             stability_thresh = st.slider(
@@ -236,6 +246,8 @@ def render_analysis_page(model):
                 max_value=0.99,
                 value=0.92,
                 step=0.01,
+                key="param_stability_thresh",
+                persist_state="session",
                 help="Stability of mask boundaries across threshold cutoffs.",
             )
             min_area_px = st.number_input(
@@ -244,6 +256,8 @@ def render_analysis_page(model):
                 max_value=50000,
                 value=100,
                 step=50,
+                key="param_min_area_px",
+                persist_state="session",
                 help="Removes tiny noise fragments below this pixel count.",
             )
 
@@ -278,21 +292,53 @@ def render_analysis_page(model):
                 default="Side-by-Side",
                 label_visibility="collapsed",
                 key="side_view_mode",
+                persist_state="session",
             )
             if not view_mode:
                 view_mode = "Side-by-Side"
 
-            alpha_val = st.slider("Overlay Transparency (Alpha)", min_value=0.1, max_value=0.9, value=0.45, step=0.05)
+            alpha_val = st.slider(
+                "Overlay Transparency (Alpha)",
+                min_value=0.1,
+                max_value=0.9,
+                value=0.45,
+                step=0.05,
+                key="ctrl_alpha",
+                persist_state="session",
+            )
 
             chk_c1, chk_c2 = st.columns(2)
             with chk_c1:
-                draw_contours = st.checkbox("Borders", value=True, help="Draw sharp contour borders around corals")
-                draw_labels = st.checkbox("ID Badges", value=True, help="Display segment ID numbers at centroids")
+                draw_contours = st.checkbox(
+                    "Borders",
+                    value=True,
+                    key="ctrl_draw_contours",
+                    persist_state="session",
+                    help="Draw sharp contour borders around corals",
+                )
+                draw_labels = st.checkbox(
+                    "ID Badges",
+                    value=True,
+                    key="ctrl_draw_labels",
+                    persist_state="session",
+                    help="Display segment ID numbers at centroids",
+                )
             with chk_c2:
-                draw_boxes = st.checkbox("Bounding Boxes", value=False, help="Show bounding box rectangles")
+                draw_boxes = st.checkbox(
+                    "Bounding Boxes",
+                    value=False,
+                    key="ctrl_draw_boxes",
+                    persist_state="session",
+                    help="Show bounding box rectangles",
+                )
 
             mask_options = ["All Corals"] + [f"Coral #{m['id']} ({m['area_pct']}% area)" for m in masks_info]
-            selected_mask_option = st.selectbox("Highlight Specific Segment", options=mask_options, index=0)
+            selected_mask_option = st.selectbox(
+                "Highlight Specific Segment",
+                options=mask_options,
+                index=0,
+                key=f"sel_mask_{current_img_name}",
+            )
             selected_mask_id = None
             if selected_mask_option != "All Corals":
                 selected_mask_id = int(selected_mask_option.split("#")[1].split(" ")[0])
