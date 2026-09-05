@@ -8,6 +8,7 @@ import os
 import io
 import json
 import colorsys
+import threading
 from typing import Dict, List, Tuple, Any, Optional, Union
 import numpy as np
 import cv2
@@ -15,6 +16,12 @@ from PIL import Image
 import torch
 import pycocotools.mask as mask_util
 from huggingface_hub import hf_hub_download
+
+# Enable CPU fallback for ops unsupported on Apple Silicon MPS
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
+# Global lock to serialize PyTorch inference across concurrent Streamlit threads (prevents Metal command buffer conflicts)
+_INFERENCE_LOCK = threading.Lock()
 
 from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 
@@ -93,7 +100,14 @@ def load_coralscop_model(checkpoint_path: Optional[str] = None, device: Optional
         checkpoint_path = download_coralscop_checkpoint()
 
     sam = sam_model_registry["vit_b"](checkpoint=checkpoint_path)
-    sam.to(device=device)
+    try:
+        sam.to(device=device)
+    except Exception:
+        if hasattr(device, "type") and device.type == "mps":
+            device = torch.device("cpu")
+            sam.to(device=device)
+        else:
+            raise
     sam.eval()
     return sam
 
@@ -154,7 +168,25 @@ def run_segmentation(
         output_mode="binary_mask",
     )
 
-    raw_masks = mask_generator.generate(image_np)
+    with _INFERENCE_LOCK:
+        try:
+            with torch.inference_mode():
+                raw_masks = mask_generator.generate(image_np)
+        finally:
+            if hasattr(torch, "mps") and hasattr(torch.mps, "synchronize"):
+                try:
+                    torch.mps.synchronize()
+                except Exception:
+                    pass
+            if hasattr(torch, "cuda") and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+    # Strictly filter out any masks smaller than min_mask_region_area
+    if min_mask_region_area > 0:
+        raw_masks = [
+            ann for ann in raw_masks
+            if int(ann.get("area", np.sum(ann["segmentation"]))) >= min_mask_region_area
+        ]
 
     # Sort masks by area descending
     raw_masks = sorted(raw_masks, key=lambda x: x["area"], reverse=True)
@@ -329,3 +361,341 @@ def build_coco_json(image_name: str, width: int, height: int, masks_info: List[D
         })
 
     return coco_output
+
+
+# ------------------ GROUND TRUTH EVALUATION & CORALSCAPES METRICS ------------------
+
+CORALSCAPES_CORAL_CLASSES = {
+    3: "other coral dead",
+    4: "other coral bleached",
+    6: "other coral alive",
+    16: "massive/meandering bleached",
+    17: "massive/meandering alive",
+    19: "branching bleached",
+    20: "branching dead",
+    21: "millepora",
+    22: "branching alive",
+    23: "massive/meandering dead",
+    25: "acropora alive",
+    27: "turbinaria",
+    28: "table acropora alive",
+    31: "pocillopora alive",
+    32: "table acropora dead",
+    33: "meandering bleached",
+    34: "stylophora alive",
+    36: "meandering alive",
+    37: "meandering dead",
+}
+
+CORALSCAPES_LIVE_CORAL_CLASSES = {
+    6: "other coral alive",
+    17: "massive/meandering alive",
+    21: "millepora",
+    22: "branching alive",
+    25: "acropora alive",
+    27: "turbinaria",
+    28: "table acropora alive",
+    31: "pocillopora alive",
+    34: "stylophora alive",
+    36: "meandering alive",
+}
+
+_CACHED_ID2LABEL: Optional[Dict[int, str]] = None
+_CACHED_LABEL2COLOR: Optional[Dict[str, List[int]]] = None
+
+
+def load_coralscapes_metadata() -> Tuple[Dict[int, str], Dict[str, List[int]]]:
+    """Loads id2label and label2color mappings from local cache or defaults."""
+    global _CACHED_ID2LABEL, _CACHED_LABEL2COLOR
+    if _CACHED_ID2LABEL is not None and _CACHED_LABEL2COLOR is not None:
+        return _CACHED_ID2LABEL, _CACHED_LABEL2COLOR
+
+    # Search local folders
+    for search_dir in ["coralscapes", "demo_images", os.path.dirname(__file__)]:
+        id2label_path = os.path.join(search_dir, "id2label.json")
+        label2color_path = os.path.join(search_dir, "label2color.json")
+        if os.path.exists(id2label_path) and os.path.exists(label2color_path):
+            try:
+                with open(id2label_path, "r", encoding="utf-8") as f1, open(label2color_path, "r", encoding="utf-8") as f2:
+                    raw_id2label = json.load(f1)
+                    _CACHED_ID2LABEL = {int(k): v for k, v in raw_id2label.items()}
+                    _CACHED_LABEL2COLOR = json.load(f2)
+                    return _CACHED_ID2LABEL, _CACHED_LABEL2COLOR
+            except Exception:
+                pass
+
+    # Fallback to standard definitions
+    _CACHED_ID2LABEL = {k: v for k, v in CORALSCAPES_CORAL_CLASSES.items()}
+    _CACHED_LABEL2COLOR = {}
+    return _CACHED_ID2LABEL, _CACHED_LABEL2COLOR
+
+
+def extract_coral_mask_from_gt(
+    gt_mask: np.ndarray,
+    target_mode: str = "all_corals",
+) -> np.ndarray:
+    """
+    Extracts a binary coral mask from an original Coralscapes ground truth mask.
+    target_mode: 'all_corals' (live, bleached, dead), 'live_corals', or 'all_benthic' (> 0).
+    """
+    if gt_mask.ndim == 3:
+        gt_mask = gt_mask[:, :, 0]
+
+    max_val = np.max(gt_mask) if gt_mask.size > 0 else 0
+    if max_val <= 1:
+        # Already binary mask
+        return gt_mask > 0
+
+    if target_mode == "live_corals":
+        target_ids = list(CORALSCAPES_LIVE_CORAL_CLASSES.keys())
+    elif target_mode == "all_benthic":
+        return gt_mask > 0
+    else:  # all_corals
+        target_ids = list(CORALSCAPES_CORAL_CLASSES.keys())
+
+    return np.isin(gt_mask, target_ids)
+
+
+def compute_ground_truth_metrics(
+    masks_info: List[Dict[str, Any]],
+    gt_mask: Union[np.ndarray, Image.Image],
+    target_mode: str = "all_corals",
+    target_shape: Optional[Tuple[int, int]] = None,
+) -> Dict[str, Any]:
+    """
+    Computes precise pixel-level IoU, Dice, Precision, and Recall comparing
+    model predictions against ground truth annotations from the original dataset.
+    """
+    if isinstance(gt_mask, Image.Image):
+        gt_mask_np = np.array(gt_mask)
+    else:
+        gt_mask_np = gt_mask.copy()
+
+    if gt_mask_np.ndim == 3:
+        gt_mask_np = gt_mask_np[:, :, 0]
+
+    h, w = gt_mask_np.shape[:2]
+    if target_shape is not None and (h, w) != target_shape:
+        gt_mask_np = cv2.resize(gt_mask_np, (target_shape[1], target_shape[0]), interpolation=cv2.INTER_NEAREST)
+        h, w = gt_mask_np.shape[:2]
+
+    # Model predicted union mask
+    pred_union = np.zeros((h, w), dtype=bool)
+    for m in masks_info:
+        m_mask = m["mask"]
+        if m_mask.shape[:2] != (h, w):
+            m_mask = cv2.resize(m_mask.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0
+        pred_union = np.logical_or(pred_union, m_mask)
+
+    # Ground truth binary coral mask
+    gt_coral = extract_coral_mask_from_gt(gt_mask_np, target_mode=target_mode)
+
+    # Pixel confusion metrics
+    intersection = int(np.logical_and(pred_union, gt_coral).sum())
+    union = int(np.logical_or(pred_union, gt_coral).sum())
+    pred_total = int(pred_union.sum())
+    gt_total = int(gt_coral.sum())
+    total_pixels = int(h * w)
+
+    tp = intersection
+    fp = pred_total - intersection
+    fn = gt_total - intersection
+    tn = total_pixels - union
+
+    iou = float(intersection / union) if union > 0 else (1.0 if pred_total == 0 and gt_total == 0 else 0.0)
+    dice = float((2.0 * intersection) / (pred_total + gt_total)) if (pred_total + gt_total) > 0 else (1.0 if pred_total == 0 and gt_total == 0 else 0.0)
+    precision = float(intersection / pred_total) if pred_total > 0 else 0.0
+    recall = float(intersection / gt_total) if gt_total > 0 else 0.0
+
+    pred_coverage_pct = round((pred_total / total_pixels) * 100.0, 2)
+    gt_coverage_pct = round((gt_total / total_pixels) * 100.0, 2)
+
+    # Class distribution analysis in GT
+    id2label, _ = load_coralscapes_metadata()
+    unique_ids, counts = np.unique(gt_mask_np, return_counts=True)
+    classes_present = []
+    for uid, count in zip(unique_ids, counts):
+        uid_int = int(uid)
+        label_name = id2label.get(uid_int, "Unlabeled" if uid_int == 0 else f"Class {uid_int}")
+        is_coral = uid_int in CORALSCAPES_CORAL_CLASSES
+        classes_present.append({
+            "class_id": uid_int,
+            "class_name": label_name,
+            "pixel_count": int(count),
+            "percentage": round(float(count / total_pixels) * 100.0, 2),
+            "is_coral_class": is_coral,
+        })
+
+    classes_present = sorted(classes_present, key=lambda x: x["pixel_count"], reverse=True)
+
+    return {
+        "iou": round(iou, 4),
+        "iou_pct": round(iou * 100.0, 2),
+        "dice": round(dice, 4),
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "true_positives": tp,
+        "false_positives": fp,
+        "false_negatives": fn,
+        "true_negatives": tn,
+        "pred_coral_pixels": pred_total,
+        "gt_coral_pixels": gt_total,
+        "intersection_pixels": intersection,
+        "union_pixels": union,
+        "pred_coverage_pct": pred_coverage_pct,
+        "gt_coverage_pct": gt_coverage_pct,
+        "target_mode": target_mode,
+        "gt_binary_mask": gt_coral,
+        "pred_binary_mask": pred_union,
+        "classes_present": classes_present,
+    }
+
+
+def create_gt_comparison_overlay(
+    image: Union[np.ndarray, Image.Image],
+    pred_binary_mask: np.ndarray,
+    gt_coral_mask: np.ndarray,
+    alpha: float = 0.55,
+) -> np.ndarray:
+    """
+    Renders an IoU diagnostic overlap map:
+    - Green: True Positive (model correctly segmented GT coral)
+    - Red: False Positive (model detected coral, but GT has background/other)
+    - Blue: False Negative (ground truth coral missed by model)
+    """
+    if isinstance(image, Image.Image):
+        image_np = np.array(image.convert("RGB"))
+    else:
+        image_np = image.copy()
+        if len(image_np.shape) == 2:
+            image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2RGB)
+        elif image_np.shape[2] == 4:
+            image_np = cv2.cvtColor(image_np, cv2.COLOR_RGBA2RGB)
+
+    h, w = image_np.shape[:2]
+    if pred_binary_mask.shape[:2] != (h, w):
+        pred_binary_mask = cv2.resize(pred_binary_mask.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0
+    if gt_coral_mask.shape[:2] != (h, w):
+        gt_coral_mask = cv2.resize(gt_coral_mask.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0
+
+    tp = np.logical_and(pred_binary_mask, gt_coral_mask)
+    fp = np.logical_and(pred_binary_mask, ~gt_coral_mask)
+    fn = np.logical_and(~pred_binary_mask, gt_coral_mask)
+
+    overlay = image_np.copy()
+    color_tp = np.array([46, 204, 113], dtype=np.uint8)   # Emerald Green
+    color_fp = np.array([231, 76, 60], dtype=np.uint8)    # Coral Red
+    color_fn = np.array([52, 152, 219], dtype=np.uint8)   # Sky Blue
+
+    # Apply colored highlights
+    if tp.any():
+        overlay[tp] = cv2.addWeighted(image_np[tp], 1.0 - alpha, np.tile(color_tp, (tp.sum(), 1)), alpha, 0)
+    if fp.any():
+        overlay[fp] = cv2.addWeighted(image_np[fp], 1.0 - alpha, np.tile(color_fp, (fp.sum(), 1)), alpha, 0)
+    if fn.any():
+        overlay[fn] = cv2.addWeighted(image_np[fn], 1.0 - alpha, np.tile(color_fn, (fn.sum(), 1)), alpha, 0)
+
+    # Draw contour borders around GT coral in white
+    gt_uint8 = (gt_coral_mask * 255).astype(np.uint8)
+    contours_gt, _ = cv2.findContours(gt_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(overlay, contours_gt, -1, (255, 255, 255), 1, cv2.LINE_AA)
+
+    return overlay
+
+
+def create_gt_semantic_overlay(
+    image: Union[np.ndarray, Image.Image],
+    gt_mask: Union[np.ndarray, Image.Image],
+    alpha: float = 0.50,
+) -> np.ndarray:
+    """
+    Renders full Coralscapes ground truth multi-class semantic overlay using label2color colors.
+    """
+    if isinstance(image, Image.Image):
+        image_np = np.array(image.convert("RGB"))
+    else:
+        image_np = image.copy()
+        if len(image_np.shape) == 2:
+            image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2RGB)
+        elif image_np.shape[2] == 4:
+            image_np = cv2.cvtColor(image_np, cv2.COLOR_RGBA2RGB)
+
+    if isinstance(gt_mask, Image.Image):
+        gt_np = np.array(gt_mask)
+    else:
+        gt_np = gt_mask.copy()
+
+    if gt_np.ndim == 3:
+        gt_np = gt_np[:, :, 0]
+
+    h, w = image_np.shape[:2]
+    if gt_np.shape[:2] != (h, w):
+        gt_np = cv2.resize(gt_np, (w, h), interpolation=cv2.INTER_NEAREST)
+
+    id2label, label2color = load_coralscapes_metadata()
+    overlay = image_np.copy()
+    colored_layer = np.zeros_like(image_np, dtype=np.uint8)
+
+    unique_ids = np.unique(gt_np)
+    for uid in unique_ids:
+        if uid == 0:
+            continue
+        label = id2label.get(int(uid), "")
+        color = label2color.get(label)
+        if not color:
+            h_val = ((int(uid) * 23) % 100) / 100.0
+            r, g, b = colorsys.hsv_to_rgb(h_val, 0.8, 0.9)
+            color = [int(r * 255), int(g * 255), int(b * 255)]
+
+        mask_uid = (gt_np == uid)
+        colored_layer[mask_uid] = color
+
+    active_mask = (gt_np > 0)
+    if active_mask.any():
+        overlay[active_mask] = cv2.addWeighted(
+            image_np[active_mask],
+            1.0 - alpha,
+            colored_layer[active_mask],
+            alpha,
+            0,
+        )
+
+    return overlay
+
+
+def create_gt_coral_overlay(
+    image: Union[np.ndarray, Image.Image],
+    gt_coral_mask: np.ndarray,
+    alpha: float = 0.45,
+    draw_contours: bool = True,
+) -> np.ndarray:
+    """
+    Renders Ground Truth coral regions cleanly overlaid on the input image with bright turquoise/cyan tint.
+    """
+    if isinstance(image, Image.Image):
+        image_np = np.array(image.convert("RGB"))
+    else:
+        image_np = image.copy()
+        if len(image_np.shape) == 2:
+            image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2RGB)
+        elif image_np.shape[2] == 4:
+            image_np = cv2.cvtColor(image_np, cv2.COLOR_RGBA2RGB)
+
+    h, w = image_np.shape[:2]
+    if gt_coral_mask.shape[:2] != (h, w):
+        gt_coral_mask = cv2.resize(gt_coral_mask.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0
+
+    overlay = image_np.copy()
+    coral_color = np.array([0, 205, 235], dtype=np.uint8)  # Vibrant Aqua / Turquoise for GT
+
+    if gt_coral_mask.any():
+        colored_mask = np.zeros_like(image_np, dtype=np.uint8)
+        colored_mask[gt_coral_mask] = coral_color
+        overlay[gt_coral_mask] = cv2.addWeighted(image_np[gt_coral_mask], 1.0 - alpha, colored_mask[gt_coral_mask], alpha, 0)
+
+        if draw_contours:
+            gt_uint8 = (gt_coral_mask * 255).astype(np.uint8)
+            contours, _ = cv2.findContours(gt_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            cv2.drawContours(overlay, contours, -1, (255, 255, 255), 2, cv2.LINE_AA)
+
+    return overlay

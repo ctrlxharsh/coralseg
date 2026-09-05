@@ -171,3 +171,72 @@ div[data-testid="stPagination"] button {
     background-color: #fef08a;
     color: #854d0e;
 }
+
+/* Ground Truth Benchmark Card & Pills */
+.gt-banner {
+    background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+    border: 1px solid #a7f3d0;
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.gt-banner-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #065f46;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.gt-legend {
+    display: flex;
+    gap: 14px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    flex-wrap: wrap;
+}
+
+.gt-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.gt-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.metric-card-gt {
+    background: #f0fdf4;
+    border: 1.5px solid #6ee7b7;
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(16, 185, 129, 0.08);
+}
+
+.metric-card-gt .metric-card-val {
+    font-size: 1.9rem;
+    font-weight: 800;
+    color: #047857;
+}
+
+.metric-card-gt .metric-card-lbl {
+    font-size: 0.8rem;
+    color: #059669;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+}

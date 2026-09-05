@@ -23,3 +23,10 @@ models/
 .vscode/
 .idea/
 *.swp
+
+# Datasets
+coralscapes/
+coralscapes_test_sample/
+datasets/
+data/
+demo_images/unlabeled_samples/
